@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Battleship Naval Command</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="game-shell">
+        <div class="top-hud">
+            <div class="status-badge" id="turn-text">GILIRANMU: KUNCI TARGET</div>
+            <div class="hud-actions">
+                <button id="btn-sound" class="hud-btn">🔊</button>
+                <button id="btn-fleet" class="hud-btn">🚢 ACAK KAPAL</button>
+            </div>
+        </div>
+
+        <div class="canvas-wrap">
+            <canvas id="battleCanvas"></canvas>
+
+            <div id="end-modal" class="modal hidden">
+                <div class="modal-card">
+                    <h2 id="end-title">KEMENANGAN!</h2>
+                    <p id="end-desc">Semua kapal musuh tenggelam.</p>
+                    <button id="btn-replay" class="fire-restart-btn">MAIN LAGI</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Konsol Metalik Bawah (Persis Gambar 1) -->
+        <div class="control-deck">
+            <div class="deck-top">
+                <!-- Lampu Indikator SHOTS -->
+                <div class="led-panel">
+                    <div class="leds">
+                        <span class="led on" id="led-1"></span>
+                        <span class="led on" id="led-2"></span>
+                        <span class="led on" id="led-3"></span>
+                    </div>
+                    <span class="deck-label">SHOTS</span>
+                </div>
+
+                <!-- Tombol Merah Besar + Tutup Pengaman -->
+                <div class="big-btn-housing">
+                    <div class="glass-hood"></div>
+                    <button id="btn-fire" class="red-fire-btn" title="TEMBAK">💥</button>
+                </div>
+
+                <!-- Kunci Pengaman -->
+                <div class="key-panel">
+                    <div class="key-ring">🔑</div>
+                    <span class="deck-label">ARMED</span>
+                </div>
+            </div>
+
+            <!-- Bar Senjata Spesial (Mirip Gambar 1) -->
+            <div class="weapon-bar">
+                <button class="weapon-slot active" id="wp-standard">
+                    <span class="wp-icon">🚀</span>
+                    <span class="wp-name">STANDARD</span>
+                </button>
+                <button class="weapon-slot" id="wp-sonar">
+                    <span class="wp-icon">📡</span>
+                    <span class="wp-name">SONAR (<span id="sonar-ammo">2</span>)</span>
+                </button>
+                <button class="weapon-slot" id="wp-barrage">
+                    <span class="wp-icon">💣</span>
+                    <span class="wp-name">BARRAGE (<span id="barrage-ammo">1</span>)</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
