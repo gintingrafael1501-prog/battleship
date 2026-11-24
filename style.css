@@ -8,10 +8,10 @@
 }
 
 body {
-    background-color: #11161f;
+    background-color: #0f141d;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     color: #e2e8f0;
-    height: 100vh;
+    height: 100dvh;
     width: 100vw;
     overflow: hidden;
     display: flex;
@@ -21,12 +21,11 @@ body {
 
 .game-shell {
     width: 100%;
-    max-width: 440px;
+    max-width: 460px;
     height: 100%;
-    max-height: 850px;
     background: #2c3545;
-    border-left: 3px solid #475569;
-    border-right: 3px solid #475569;
+    border-left: 2px solid #475569;
+    border-right: 2px solid #475569;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -39,21 +38,26 @@ body {
     padding: 8px 10px;
     background: #1e2530;
     border-bottom: 2px solid #475569;
+    gap: 6px;
 }
 
 .status-badge {
     font-size: 11px;
     font-weight: 800;
-    color: #4ade80;
-    background: #062817;
-    border: 1px solid #22c55e;
-    padding: 5px 9px;
+    color: #facc15;
+    background: #272009;
+    border: 1px solid #eab308;
+    padding: 5px 8px;
     border-radius: 5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .hud-actions {
     display: flex;
-    gap: 6px;
+    gap: 5px;
+    flex-shrink: 0;
 }
 
 .hud-btn {
@@ -65,6 +69,22 @@ body {
     font-weight: bold;
     border-radius: 5px;
     cursor: pointer;
+}
+
+.hud-select {
+    background: #334155;
+    color: #facc15;
+    border: 1px solid #64748b;
+    padding: 4px 6px;
+    font-size: 11px;
+    font-weight: 800;
+    border-radius: 5px;
+    cursor: pointer;
+    outline: none;
+}
+
+.hud-select:disabled {
+    opacity: 0.6;
 }
 
 .canvas-wrap {
@@ -85,7 +105,7 @@ canvas {
 
 .control-deck {
     background: linear-gradient(180deg, #525d6e 0%, #374151 100%);
-    border-top: 4px solid #6b7280;
+    border-top: 3px solid #6b7280;
     padding: 8px 12px 12px 12px;
     box-shadow: inset 0 4px 10px rgba(0, 0, 0, 0.45);
 }
@@ -103,9 +123,10 @@ canvas {
     align-items: center;
     gap: 4px;
     background: #1f2937;
-    padding: 7px 12px;
+    padding: 6px 12px;
     border-radius: 8px;
     border: 2px solid #4b5563;
+    min-width: 78px;
 }
 
 .leds {
@@ -114,8 +135,8 @@ canvas {
 }
 
 .led {
-    width: 11px;
-    height: 11px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     background: #14532d;
 }
@@ -134,8 +155,8 @@ canvas {
 
 .big-btn-housing {
     position: relative;
-    width: 78px;
-    height: 78px;
+    width: 74px;
+    height: 74px;
     background: #1f2937;
     border-radius: 50%;
     display: flex;
@@ -147,9 +168,9 @@ canvas {
 
 .glass-hood {
     position: absolute;
-    top: -10px;
-    width: 58px;
-    height: 16px;
+    top: -9px;
+    width: 54px;
+    height: 14px;
     background: rgba(255, 255, 255, 0.25);
     border: 1px solid rgba(255, 255, 255, 0.5);
     border-radius: 4px;
@@ -157,23 +178,30 @@ canvas {
 }
 
 .red-fire-btn {
-    width: 60px;
-    height: 60px;
+    width: 56px;
+    height: 56px;
     border-radius: 50%;
-    background: radial-gradient(circle at 35% 35%, #f87171, #dc2626 65%, #991b1b 100%);
-    border: 3px solid #fca5a5;
-    font-size: 24px;
+    background: radial-gradient(circle at 35% 35%, #4ade80, #16a34a 65%, #14532d 100%);
+    border: 3px solid #bbf7d0;
+    font-size: 22px;
     cursor: pointer;
+    box-shadow: 0 4px 0 #052e16;
+}
+
+.red-fire-btn.combat-mode {
+    background: radial-gradient(circle at 35% 35%, #f87171, #dc2626 65%, #991b1b 100%);
+    border-color: #fca5a5;
     box-shadow: 0 4px 0 #7f1d1d;
 }
 
 .red-fire-btn:active {
     transform: translateY(3px);
-    box-shadow: 0 1px 0 #7f1d1d;
 }
 
 .key-ring {
-    font-size: 18px;
+    font-size: 15px;
+    font-weight: 900;
+    color: #38bdf8;
 }
 
 .weapon-bar {
@@ -183,6 +211,11 @@ canvas {
     padding: 5px;
     border-radius: 8px;
     border: 2px solid #4b5563;
+}
+
+.weapon-bar.locked {
+    opacity: 0.45;
+    pointer-events: none;
 }
 
 .weapon-slot {
@@ -203,11 +236,15 @@ canvas {
     background: linear-gradient(180deg, #0284c7 0%, #0369a1 100%);
     border-color: #7dd3fc;
     color: #ffffff;
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+}
+
+.weapon-slot.charging {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .wp-icon {
-    font-size: 15px;
+    font-size: 14px;
 }
 
 .wp-name {
@@ -215,10 +252,20 @@ canvas {
     font-weight: 800;
 }
 
+.wp-sub {
+    font-size: 9px;
+    font-weight: 800;
+    color: #38bdf8;
+}
+
+.weapon-slot.charging .wp-sub {
+    color: #facc15;
+}
+
 .modal {
     position: absolute;
     inset: 0;
-    background: rgba(15, 23, 42, 0.88);
+    background: rgba(15, 23, 42, 0.9);
     display: flex;
     justify-content: center;
     align-items: center;

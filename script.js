@@ -1,19 +1,34 @@
 const canvas = document.getElementById("battleCanvas"), ctx = canvas.getContext("2d");
-const turnText = document.getElementById("turn-text"), endModal = document.getElementById("end-modal");
-const endTitle = document.getElementById("end-title"), endDesc = document.getElementById("end-desc");
+const statusText = document.getElementById("status-text"), btnMain = document.getElementById("btn-main");
+const btnAuto = document.getElementById("btn-auto"), weaponBar = document.getElementById("weapon-bar");
+const levelSelect = document.getElementById("level-select");
+const fleetCountEl = document.getElementById("fleet-count"), ledLabelEl = document.getElementById("led-label");
+const endModal = document.getElementById("end-modal"), endTitle = document.getElementById("end-title"), endDesc = document.getElementById("end-desc");
 const wpStandard = document.getElementById("wp-standard"), wpSonar = document.getElementById("wp-sonar"), wpBarrage = document.getElementById("wp-barrage");
-const sonarAmmoEl = document.getElementById("sonar-ammo"), barrageAmmoEl = document.getElementById("barrage-ammo");
+const sonarChargeEl = document.getElementById("sonar-charge"), barrageChargeEl = document.getElementById("barrage-charge");
 
 const GRID = 8;
 let cw = 380, ch = 520, cell = 30, radarX = 0, radarY = 10, oceanX = 0, oceanY = 270;
-let radarAngle = 0, waveTime = 0, playerTurn = true, gameOver = false, soundOn = true;
-let targetR = 3, targetC = 3, selectedWeapon = "standard", sonarAmmo = 2, barrageAmmo = 1;
+let radarAngle = 0, waveTime = 0, phase = "setup", playerTurn = true, soundOn = true;
+let targetR = 3, targetC = 3, selectedWeapon = "standard";
+
+const SONAR_MAX = 2, BARRAGE_MAX = 4;
+let sonarCharge = 2, barrageCharge = 4;
+let difficulty = "medium";
+
 let playerBoard = [], enemyBoard = [], playerShips = [], enemyShips = [];
 let missiles = [], explosions = [], splashes = [], floatingLabels = [];
+let aiTargets = [];
+
+let draggingShip = null, dragMoved = false, dragStartX = 0, dragStartY = 0;
+let dragOffsetX = 0, dragOffsetY = 0, previewR = -1, previewC = -1, previewValid = false;
 
 const SHIP_TYPES = [
-    { size: 5, code: "05" }, { size: 4, code: "04" }, { size: 3, code: "03" },
-    { size: 3, code: "03" }, { size: 2, code: "02" }
+    { name: "Carrier", size: 5, code: "05" },
+    { name: "Battleship", size: 4, code: "04" },
+    { name: "Cruiser", size: 3, code: "03" },
+    { name: "Submarine", size: 3, code: "03" },
+    { name: "Destroyer", size: 2, code: "02" }
 ];
 
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -23,27 +38,35 @@ function playSound(type) {
     if (!soundOn || !audioCtx) return;
     if (audioCtx.state === "suspended") audioCtx.resume();
     const now = audioCtx.currentTime, osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
-    const cfg = {
+    const list = {
         lock: ["sine", 920, 920, 0.08, 0.07],
-        launch: ["sawtooth", 440, 130, 0.15, 0.35],
-        hit: ["square", 140, 30, 0.24, 0.45],
-        miss: ["triangle", 260, 85, 0.14, 0.25]
-    }[type];
-    osc.type = cfg; osc.frequency.setValueAtTime(cfg, now);
-    osc.frequency.exponentialRampToValueAtTime(cfg, now + cfg);
-    gain.gain.setValueAtTime(cfg, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + cfg);
+        launch: ["sawtooth", 440, 130, 0.14, 0.32],
+        hit: ["square", 140, 30, 0.22, 0.42],
+        miss: ["triangle", 260, 85, 0.12, 0.22],
+        sunk: ["sawtooth", 180, 45, 0.28, 0.65],
+        ready: ["sine", 660, 990, 0.12, 0.2]
+    };
+    const cfg = list[type];
+    if (!cfg) return;
+    osc.type = cfg[0];
+    osc.frequency.setValueAtTime(cfg[1], now);
+    osc.frequency.exponentialRampToValueAtTime(cfg[2], now + cfg[4]);
+    gain.gain.setValueAtTime(cfg[3], now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + cfg[4]);
     osc.connect(gain); gain.connect(audioCtx.destination);
-    osc.start(); osc.stop(now + cfg);
+    osc.start(); osc.stop(now + cfg[4]);
 }
 function resize() {
     const wrap = canvas.parentElement, dpr = window.devicePixelRatio || 1;
-    cw = Math.min(wrap.clientWidth, 430); ch = wrap.clientHeight;
+    cw = wrap.clientWidth; ch = wrap.clientHeight;
     canvas.style.width = cw + "px"; canvas.style.height = ch + "px";
     canvas.width = cw * dpr; canvas.height = ch * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    cell = Math.floor(Math.min(Math.floor((ch - 26) / 2), cw - 92) / GRID);
+    const maxGridH = Math.floor((ch - 24) / 2);
+    const maxGridW = cw - 84;
+    cell = Math.max(22, Math.floor(Math.min(maxGridH, maxGridW) / GRID));
+
     const gridPx = cell * GRID;
     radarX = oceanX = Math.floor((cw - gridPx) / 2);
     radarY = Math.floor((ch / 2 - gridPx) / 2);
@@ -52,21 +75,45 @@ function resize() {
 
 const emptyBoard = () => Array.from({ length: GRID }, () => Array(GRID).fill(0));
 
-function canFit(board, r, c, size, horiz) {
+function canFit(board, r, c, size, horiz, ignoreShip) {
     for (let k = 0; k < size; k++) {
         const nr = horiz ? r : r + k, nc = horiz ? c + k : c;
-        if (nr >= GRID || nc >= GRID || board[nr][nc] !== 0) return false;
+        if (nr < 0 || nc < 0 || nr >= GRID || nc >= GRID) return false;
+        if (board[nr][nc] !== 0) {
+            if (!ignoreShip) return false;
+            const isSelf = ignoreShip.cells.some(pt => pt.r === nr && pt.c === nc);
+            if (!isSelf) return false;
+        }
     }
     return true;
 }
 
-function placeFleet(board) {
+function rebuildBoardFromShips(ships) {
+    const b = emptyBoard();
+    ships.forEach(s => {
+        s.cells = [];
+        for (let k = 0; k < s.size; k++) {
+            const nr = s.horizontal ? s.r : s.r + k;
+            const nc = s.horizontal ? s.c + k : s.c;
+            b[nr][nc] = 1;
+            s.cells.push({ r: nr, c: nc });
+        }
+    });
+    return b;
+}
+
+function generateRandomFleet() {
+    const b = emptyBoard();
     return SHIP_TYPES.map(info => {
         while (true) {
             const horiz = Math.random() < 0.5, r = Math.floor(Math.random() * GRID), c = Math.floor(Math.random() * GRID);
-            if (canFit(board, r, c, info.size, horiz)) {
-                for (let k = 0; k < info.size; k++) board[horiz ? r : r + k][horiz ? c + k : c] = 1;
-                return { code: info.code, size: info.size, r, c, horizontal: horiz };
+            if (canFit(b, r, c, info.size, horiz, null)) {
+                let cells = [];
+                for (let k = 0; k < info.size; k++) {
+                    const nr = horiz ? r : r + k, nc = horiz ? c + k : c;
+                    b[nr][nc] = 1; cells.push({ r: nr, c: nc });
+                }
+                return { name: info.name, code: info.code, size: info.size, r, c, horizontal: horiz, cells, sunk: false };
             }
         }
     });
@@ -74,21 +121,52 @@ function placeFleet(board) {
 
 function initGame() {
     resize();
-    playerBoard = emptyBoard(); enemyBoard = emptyBoard();
-    playerShips = placeFleet(playerBoard); enemyShips = placeFleet(enemyBoard);
-    missiles = []; explosions = []; splashes = []; floatingLabels = [];
-    playerTurn = true; gameOver = false; targetR = 3; targetC = 3; sonarAmmo = 2; barrageAmmo = 1;
-    selectWeapon("standard"); updateAmmoUI();
+    difficulty = levelSelect.value;
+    playerShips = generateRandomFleet();
+    playerBoard = rebuildBoardFromShips(playerShips);
+    enemyShips = generateRandomFleet();
+    enemyBoard = rebuildBoardFromShips(enemyShips);
+
+    missiles = []; explosions = []; splashes = []; floatingLabels = []; aiTargets = [];
+    phase = "setup"; playerTurn = true;
+    targetR = 3; targetC = 3;
+    sonarCharge = SONAR_MAX;
+    barrageCharge = BARRAGE_MAX;
+    selectWeapon("standard");
+    updateSkillUI();
     endModal.classList.add("hidden");
-    turnText.textContent = "GILIRANMU: KUNCI TARGET"; turnText.style.color = "#4ade80";
+
+    btnMain.textContent = "⚔️";
+    btnMain.classList.remove("combat-mode");
+    btnAuto.style.display = "inline-block";
+    levelSelect.disabled = false;
+    weaponBar.classList.add("locked");
+    ledLabelEl.textContent = "SETUP";
+    fleetCountEl.textContent = "5/5";
+    statusText.textContent = "GESER KAPAL / TAP PUTAR, TEKAN ⚔️";
+    statusText.style.color = "#facc15";
 }
-function updateAmmoUI() {
-    sonarAmmoEl.textContent = sonarAmmo;
-    barrageAmmoEl.textContent = barrageAmmo;
+function updateSkillUI() {
+    const sonarReady = sonarCharge >= SONAR_MAX;
+    const barrageReady = barrageCharge >= BARRAGE_MAX;
+
+    sonarChargeEl.textContent = sonarReady ? "SIAP ⚡" : sonarCharge + "/" + SONAR_MAX + " ⚡";
+    barrageChargeEl.textContent = barrageReady ? "SIAP ⚡" : barrageCharge + "/" + BARRAGE_MAX + " ⚡";
+
+    wpSonar.classList.toggle("charging", !sonarReady);
+    wpBarrage.classList.toggle("charging", !barrageReady);
+}
+
+function addSkillEnergy(amount) {
+    const wasSonar = sonarCharge >= SONAR_MAX, wasBarrage = barrageCharge >= BARRAGE_MAX;
+    sonarCharge = Math.min(SONAR_MAX, sonarCharge + amount);
+    barrageCharge = Math.min(BARRAGE_MAX, barrageCharge + amount);
+    updateSkillUI();
+    if ((!wasSonar && sonarCharge >= SONAR_MAX) || (!wasBarrage && barrageCharge >= BARRAGE_MAX)) playSound("ready");
 }
 
 function selectWeapon(type) {
-    if ((type === "sonar" && sonarAmmo <= 0) || (type === "barrage" && barrageAmmo <= 0)) return;
+    if ((type === "sonar" && sonarCharge < SONAR_MAX) || (type === "barrage" && barrageCharge < BARRAGE_MAX)) return;
     selectedWeapon = type;
     wpStandard.classList.toggle("active", type === "standard");
     wpSonar.classList.toggle("active", type === "sonar");
@@ -99,40 +177,149 @@ wpStandard.onclick = () => selectWeapon("standard");
 wpSonar.onclick = () => selectWeapon("sonar");
 wpBarrage.onclick = () => selectWeapon("barrage");
 document.getElementById("btn-replay").onclick = initGame;
+levelSelect.onchange = () => { difficulty = levelSelect.value; playSound("lock"); };
 
-document.getElementById("btn-fleet").onclick = () => {
-    if (missiles.length || gameOver) return;
-    playerBoard = emptyBoard(); playerShips = placeFleet(playerBoard); playSound("lock");
+btnAuto.onclick = () => {
+    if (phase !== "setup") return;
+    draggingShip = null;
+    playerShips = generateRandomFleet();
+    playerBoard = rebuildBoardFromShips(playerShips);
+    playSound("lock");
 };
 
 document.getElementById("btn-sound").onclick = (e) => {
     soundOn = !soundOn; e.target.textContent = soundOn ? "🔊" : "🔇";
 };
 
-canvas.addEventListener("pointerdown", (e) => {
-    if (!playerTurn || gameOver) return;
-    const rect = canvas.getBoundingClientRect(), gridPx = cell * GRID;
+canvas.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (phase !== "setup") return;
+    const rect = canvas.getBoundingClientRect();
     const px = e.clientX - rect.left, py = e.clientY - rect.top;
-    if (px >= radarX && px <= radarX + gridPx && py >= radarY && py <= radarY + gridPx) {
-        targetC = Math.floor((px - radarX) / cell);
-        targetR = Math.floor((py - radarY) / cell);
-        playSound("lock");
+    const col = Math.floor((px - oceanX) / cell), row = Math.floor((py - oceanY) / cell);
+    const targetShip = playerShips.find(s => s.cells.some(pt => pt.r === row && pt.c === col));
+
+    if (targetShip) {
+        const nextHoriz = !targetShip.horizontal;
+        if (canFit(playerBoard, targetShip.r, targetShip.c, targetShip.size, nextHoriz, targetShip)) {
+            targetShip.horizontal = nextHoriz;
+            playerBoard = rebuildBoardFromShips(playerShips);
+            playSound("lock");
+        } else {
+            playSound("miss");
+        }
     }
 });
 
-document.getElementById("btn-fire").onclick = () => {
-    if (!playerTurn || gameOver || missiles.length) return;
-    if (selectedWeapon === "sonar" && sonarAmmo > 0) {
-        sonarAmmo--; updateAmmoUI(); launchMissile(targetR, targetC, true, "sonar"); selectWeapon("standard");
-    } else if (selectedWeapon === "barrage" && barrageAmmo > 0) {
-        barrageAmmo--; updateAmmoUI();
-        [0, -1, 1, 0, 0].forEach((dr, i) => {
-            const nr = targetR + dr, nc = targetC + [0, 0, 0, -1, 1][i];
+canvas.addEventListener("pointerdown", (e) => {
+    if (e.button === 2) return;
+    const rect = canvas.getBoundingClientRect(), gridPx = cell * GRID;
+    const px = e.clientX - rect.left, py = e.clientY - rect.top;
+
+    if (phase === "setup") {
+        if (px >= oceanX && px <= oceanX + gridPx && py >= oceanY && py <= oceanY + gridPx) {
+            const col = Math.floor((px - oceanX) / cell), row = Math.floor((py - oceanY) / cell);
+            const found = playerShips.find(s => s.cells.some(pt => pt.r === row && pt.c === col));
+            if (found) {
+                draggingShip = found;
+                dragMoved = false;
+                dragStartX = px; dragStartY = py;
+                dragOffsetX = px - (oceanX + found.c * cell);
+                dragOffsetY = py - (oceanY + found.r * cell);
+                draggingShip.floatX = oceanX + found.c * cell;
+                draggingShip.floatY = oceanY + found.r * cell;
+                previewR = found.r; previewC = found.c; previewValid = true;
+                playSound("lock");
+            }
+        }
+        return;
+    }
+
+    if (phase === "combat" && playerTurn) {
+        if (px >= radarX && px <= radarX + gridPx && py >= radarY && py <= radarY + gridPx) {
+            targetC = Math.floor((px - radarX) / cell);
+            targetR = Math.floor((py - radarY) / cell);
+            playSound("lock");
+        }
+    }
+});
+
+window.addEventListener("pointermove", (e) => {
+    if (!draggingShip || phase !== "setup") return;
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left, py = e.clientY - rect.top;
+    if (Math.hypot(px - dragStartX, py - dragStartY) > 8) dragMoved = true;
+
+    const liftY = e.pointerType === "touch" ? 55 : 0;
+    const shipLeftX = px - dragOffsetX;
+    const shipTopY = (py - liftY) - dragOffsetY;
+
+    draggingShip.floatX = shipLeftX;
+    draggingShip.floatY = shipTopY;
+
+    previewC = Math.round((shipLeftX - oceanX) / cell);
+    previewR = Math.round((shipTopY - oceanY) / cell);
+    previewValid = canFit(playerBoard, previewR, previewC, draggingShip.size, draggingShip.horizontal, draggingShip);
+});
+
+window.addEventListener("pointerup", () => {
+    if (draggingShip && phase === "setup") {
+        if (!dragMoved) {
+            const nextHoriz = !draggingShip.horizontal;
+            if (canFit(playerBoard, draggingShip.r, draggingShip.c, draggingShip.size, nextHoriz, draggingShip)) {
+                draggingShip.horizontal = nextHoriz;
+                playerBoard = rebuildBoardFromShips(playerShips);
+                playSound("lock");
+            } else {
+                playSound("miss");
+            }
+        } else if (previewValid) {
+            draggingShip.r = previewR;
+            draggingShip.c = previewC;
+            playerBoard = rebuildBoardFromShips(playerShips);
+            playSound("lock");
+        } else {
+            playSound("miss");
+        }
+    }
+    draggingShip = null;
+    previewR = -1; previewC = -1;
+});
+
+btnMain.onclick = () => {
+    if (phase === "setup") {
+        draggingShip = null;
+        phase = "combat";
+        btnMain.textContent = "💥";
+        btnMain.classList.add("combat-mode");
+        btnAuto.style.display = "none";
+        levelSelect.disabled = true;
+        weaponBar.classList.remove("locked");
+        ledLabelEl.textContent = "SHOTS";
+        statusText.textContent = "GILIRANMU: KUNCI TARGET RADAR";
+        statusText.style.color = "#4ade80";
+        playSound("lock");
+        return;
+    }
+
+    if (phase !== "combat" || !playerTurn || missiles.length > 0) return;
+
+    if (selectedWeapon === "sonar" && sonarCharge >= SONAR_MAX) {
+        sonarCharge = 0; updateSkillUI();
+        launchMissile(targetR, targetC, true, "sonar");
+        selectWeapon("standard");
+    } else if (selectedWeapon === "barrage" && barrageCharge >= BARRAGE_MAX) {
+        barrageCharge = 0; updateSkillUI();
+        const drList = [0, -1, 1, 0, 0], dcList = [0, 0, 0, -1, 1];
+        for (let i = 0; i < 5; i++) {
+            const nr = targetR + drList[i], nc = targetC + dcList[i];
             if (nr >= 0 && nr < GRID && nc >= 0 && nc < GRID) launchMissile(nr, nc, true, "normal");
-        });
+        }
         selectWeapon("standard");
     } else if (enemyBoard[targetR][targetC] !== 2 && enemyBoard[targetR][targetC] !== 3) {
         launchMissile(targetR, targetC, true, "normal");
+        const isHit = enemyBoard[targetR][targetC] === 1 || enemyBoard[targetR][targetC] === 4;
+        addSkillEnergy(isHit ? 2 : 1);
     }
 };
 function launchMissile(r, c, isPlayer, mode) {
@@ -143,6 +330,20 @@ function launchMissile(r, c, isPlayer, mode) {
         destY: (isPlayer ? radarY : oceanY) + r * cell + cell / 2,
         r, c, isPlayer, mode, progress: 0
     });
+}
+
+function checkShipSunk(ships, board, isPlayerAttack) {
+    ships.forEach(s => {
+        if (!s.sunk && s.cells.every(pt => board[pt.r][pt.c] === 3)) {
+            s.sunk = true;
+            playSound("sunk");
+            const mid = s.cells[Math.floor(s.cells.length / 2)];
+            const cx = (isPlayerAttack ? radarX : oceanX) + mid.c * cell + cell / 2;
+            const cy = (isPlayerAttack ? radarY : oceanY) + mid.r * cell + cell / 2;
+            floatingLabels.push({ text: s.name.toUpperCase() + " TENGGELAM!", x: cx, y: cy - 10, color: "#ef4444", alpha: 1 });
+        }
+    });
+    fleetCountEl.textContent = enemyShips.filter(s => !s.sunk).length + "/5";
 }
 
 function resolveImpact(m) {
@@ -166,33 +367,61 @@ function resolveImpact(m) {
             explosions.push({ x: m.destX, y: m.destY, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd, radius: 4 + Math.random() * 5, color: i % 2 ? "#facc15" : "#ef4444", alpha: 1 });
         }
         floatingLabels.push({ text: "HIT!", x: m.destX, y: m.destY - 12, color: "#facc15", alpha: 1 });
+        checkShipSunk(m.isPlayer ? enemyShips : playerShips, board, m.isPlayer);
+
+        if (!m.isPlayer && difficulty !== "easy") {
+            const drList = [0, 0, 1, -1], dcList = [1, -1, 0, 0];
+            for (let i = 0; i < 4; i++) {
+                const nr = m.r + drList[i], nc = m.c + dcList[i];
+                if (nr >= 0 && nr < GRID && nc >= 0 && nc < GRID && playerBoard[nr][nc] < 2) {
+                    aiTargets.push({ r: nr, c: nc });
+                }
+            }
+        }
     } else if (val === 0) {
         board[m.r][m.c] = 2; playSound("miss");
         splashes.push({ x: m.destX, y: m.destY, radius: 4, alpha: 1 });
         floatingLabels.push({ text: "MISS", x: m.destX, y: m.destY - 12, color: "#4ade80", alpha: 1 });
     }
 
-    if (!missiles.length && !checkVictory()) {
+    if (missiles.length === 0 && !checkVictory()) {
         if (m.isPlayer) finishTurn();
-        else { playerTurn = true; turnText.textContent = "GILIRANMU: KUNCI TARGET"; turnText.style.color = "#4ade80"; }
+        else { playerTurn = true; statusText.textContent = "GILIRANMU: KUNCI TARGET RADAR"; statusText.style.color = "#4ade80"; }
     }
 }
 
 function finishTurn() {
-    playerTurn = false; turnText.textContent = "MUSUH MEMBIDIK ARMADA..."; turnText.style.color = "#f87171";
+    playerTurn = false; statusText.textContent = "MUSUH MEMBIDIK ARMADA..."; statusText.style.color = "#f87171";
     setTimeout(() => {
-        if (gameOver) return;
-        let pool = [];
-        for (let r = 0; r < GRID; r++) for (let c = 0; c < GRID; c++) if (playerBoard[r][c] < 2) pool.push({ r, c });
-        if (pool.length) { const p = pool[Math.floor(Math.random() * pool.length)]; launchMissile(p.r, p.c, false, "normal"); }
-    }, 850);
+        if (phase !== "combat") return;
+        let pick = null;
+
+        while (aiTargets.length > 0 && !pick) {
+            const cand = aiTargets.shift();
+            if (playerBoard[cand.r][cand.c] < 2) pick = cand;
+        }
+
+        if (!pick && difficulty === "hard" && Math.random() < 0.30) {
+            let shipCells = [];
+            for (let r = 0; r < GRID; r++) for (let c = 0; c < GRID; c++) if (playerBoard[r][c] === 1) shipCells.push({ r, c });
+            if (shipCells.length) pick = shipCells[Math.floor(Math.random() * shipCells.length)];
+        }
+
+        if (!pick) {
+            let pool = [];
+            for (let r = 0; r < GRID; r++) for (let c = 0; c < GRID; c++) if (playerBoard[r][c] < 2) pool.push({ r, c });
+            if (pool.length) pick = pool[Math.floor(Math.random() * pool.length)];
+        }
+
+        if (pick) launchMissile(pick.r, pick.c, false, "normal");
+    }, 800);
 }
 
 function checkVictory() {
-    const enemyAlive = enemyBoard.some(row => row.includes(1) || row.includes(4));
-    const playerAlive = playerBoard.some(row => row.includes(1));
+    const enemyAlive = enemyShips.some(s => !s.sunk);
+    const playerAlive = playerShips.some(s => !s.sunk);
     if (!enemyAlive || !playerAlive) {
-        gameOver = true;
+        phase = "gameover";
         endTitle.textContent = !enemyAlive ? "KEMENANGAN!" : "ARMADA HANCUR!";
         endTitle.style.color = !enemyAlive ? "#4ade80" : "#f87171";
         endDesc.textContent = !enemyAlive ? "Semua 5 kapal musuh tenggelam!" : "Seluruh armada kapalmu tenggelam.";
@@ -207,19 +436,27 @@ function roundBox(x, y, w, h, r) {
     ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
 }
 
-function drawWarship(s) {
-    const x = oceanX + s.c * cell, y = oceanY + s.r * cell;
+function drawWarshipAt(s, x, y, isEnemyRevealed, isFloating) {
     const w = s.horizontal ? s.size * cell : cell, h = s.horizontal ? cell : s.size * cell;
     const rip = Math.sin(waveTime * 3 + s.r) * 2.5;
 
     ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 1.5;
-    roundBox(x + 2 - rip / 2, y + 2 - rip / 2, w - 4 + rip, h - 4 + rip, 9); ctx.stroke();
+    if (isFloating) {
+        ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
+        ctx.shadowBlur = 12;
+        ctx.shadowOffsetY = 8;
+    } else if (!isEnemyRevealed) {
+        ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 1.5;
+        roundBox(x + 2 - rip / 2, y + 2 - rip / 2, w - 4 + rip, h - 4 + rip, 9); ctx.stroke();
+    }
 
-    ctx.fillStyle = "#94a3b8"; ctx.strokeStyle = "#1e293b"; ctx.lineWidth = 2;
+    ctx.fillStyle = s.sunk ? "#475569" : "#94a3b8";
+    ctx.strokeStyle = s.sunk ? "#ef4444" : (isFloating ? "#facc15" : "#1e293b");
+    ctx.lineWidth = 2;
     roundBox(x + 4, y + 4, w - 8, h - 8, 8); ctx.fill(); ctx.stroke();
 
-    ctx.fillStyle = "#64748b"; roundBox(x + 7, y + 7, w - 14, h - 14, 5); ctx.fill();
+    ctx.fillStyle = s.sunk ? "#334155" : "#64748b";
+    roundBox(x + 7, y + 7, w - 14, h - 14, 5); ctx.fill();
 
     if (s.code === "05") {
         ctx.strokeStyle = "#f8fafc"; ctx.lineWidth = 1.5; ctx.beginPath();
@@ -227,20 +464,20 @@ function drawWarship(s) {
         ctx.stroke();
     }
 
-    ctx.fillStyle = "#334155"; ctx.beginPath(); ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) * 0.22, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#1e293b"; ctx.beginPath(); ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) * 0.22, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#fff"; ctx.font = "bold 9px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText(s.code, x + w / 2, y + h / 2); ctx.restore();
 }
 
 function drawRadar() {
     const gPx = cell * GRID, cx = radarX + gPx / 2, cy = radarY + gPx / 2;
-    ctx.fillStyle = "#4b5563"; ctx.fillRect(radarX - 38, radarY - 6, gPx + 76, gPx + 12);
-    ctx.fillStyle = "#1f2937"; ctx.fillRect(radarX - 32, radarY + 4, 24, gPx - 8); ctx.fillRect(radarX + gPx + 8, radarY + 4, 24, gPx - 8);
+    ctx.fillStyle = "#4b5563"; ctx.fillRect(radarX - 36, radarY - 6, gPx + 72, gPx + 12);
+    ctx.fillStyle = "#1f2937"; ctx.fillRect(radarX - 30, radarY + 4, 22, gPx - 8); ctx.fillRect(radarX + gPx + 8, radarY + 4, 22, gPx - 8);
 
     ctx.strokeStyle = "#4b5563"; ctx.lineWidth = 1;
     for (let sy = radarY + 10; sy < radarY + gPx - 10; sy += 5) {
-        ctx.beginPath(); ctx.moveTo(radarX - 28, sy); ctx.lineTo(radarX - 12, sy);
-        ctx.moveTo(radarX + gPx + 12, sy); ctx.lineTo(radarX + gPx + 28, sy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(radarX - 26, sy); ctx.lineTo(radarX - 12, sy);
+        ctx.moveTo(radarX + gPx + 12, sy); ctx.lineTo(radarX + gPx + 26, sy); ctx.stroke();
     }
 
     ctx.fillStyle = "#063b1c"; ctx.fillRect(radarX, radarY, gPx, gPx);
@@ -253,18 +490,20 @@ function drawRadar() {
     ctx.fillStyle = grad; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, gPx * 0.8, radarAngle, radarAngle + 0.55); ctx.closePath(); ctx.fill();
     ctx.restore();
 
+    enemyShips.forEach(s => { if (s.sunk) drawWarshipAt(s, radarX + s.c * cell, radarY + s.r * cell, true, false); });
+
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     for (let r = 0; r < GRID; r++) {
         for (let c = 0; c < GRID; c++) {
             const x = radarX + c * cell, y = radarY + r * cell, st = enemyBoard[r][c];
             ctx.strokeStyle = "rgba(74,222,128,0.35)"; ctx.strokeRect(x, y, cell, cell);
-            if (st === 2) { ctx.fillStyle = "#4ade80"; ctx.font = "bold " + Math.floor(cell * 0.55) + "px sans-serif"; ctx.fillText("✖", x + cell / 2, y + cell / 2); }
-            else if (st === 3) { ctx.fillStyle = "rgba(239,68,68,0.45)"; ctx.fillRect(x + 2, y + 2, cell - 4, cell - 4); ctx.font = "bold " + Math.floor(cell * 0.6) + "px sans-serif"; ctx.fillText("🔥", x + cell / 2, y + cell / 2); }
-            else if (st === 4) { ctx.fillStyle = "rgba(56,189,248,0.5)"; ctx.fillRect(x + 3, y + 3, cell - 6, cell - 6); }
+            if (st === 2) { ctx.fillStyle = "#4ade80"; ctx.font = "bold " + Math.floor(cell * 0.52) + "px sans-serif"; ctx.fillText("✖", x + cell / 2, y + cell / 2); }
+            else if (st === 3) { ctx.font = "bold " + Math.floor(cell * 0.58) + "px sans-serif"; ctx.fillText("🔥", x + cell / 2, y + cell / 2); }
+            else if (st === 4) { ctx.fillStyle = "rgba(56,189,248,0.55)"; ctx.fillRect(x + 3, y + 3, cell - 6, cell - 6); }
         }
     }
 
-    if (playerTurn && !gameOver) {
+    if (phase === "combat" && playerTurn) {
         ctx.strokeStyle = "#facc15"; ctx.lineWidth = 2.5;
         ctx.strokeRect(radarX + targetC * cell + 2, radarY + targetR * cell + 2, cell - 4, cell - 4);
     }
@@ -290,14 +529,33 @@ function drawOcean() {
         }
     }
 
-    playerShips.forEach(drawWarship);
+    if (draggingShip && dragMoved && previewR !== -1 && previewC !== -1) {
+        for (let k = 0; k < draggingShip.size; k++) {
+            const nr = draggingShip.horizontal ? previewR : previewR + k;
+            const nc = draggingShip.horizontal ? previewC + k : previewC;
+            if (nr >= 0 && nr < GRID && nc >= 0 && nc < GRID) {
+                ctx.fillStyle = previewValid ? "rgba(74, 222, 128, 0.45)" : "rgba(239, 68, 68, 0.55)";
+                ctx.fillRect(oceanX + nc * cell + 2, oceanY + nr * cell + 2, cell - 4, cell - 4);
+            }
+        }
+    }
+
+    playerShips.forEach(s => {
+        if (s !== draggingShip || !dragMoved) {
+            drawWarshipAt(s, oceanX + s.c * cell, oceanY + s.r * cell, false, false);
+        }
+    });
+
+    if (draggingShip && dragMoved) {
+        drawWarshipAt(draggingShip, draggingShip.floatX, draggingShip.floatY, false, true);
+    }
 
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     for (let r = 0; r < GRID; r++) {
         for (let c = 0; c < GRID; c++) {
             const x = oceanX + c * cell, y = oceanY + r * cell;
             if (playerBoard[r][c] === 2) { ctx.fillStyle = "#bae6fd"; ctx.beginPath(); ctx.arc(x + cell / 2, y + cell / 2, 4, 0, Math.PI * 2); ctx.fill(); }
-            else if (playerBoard[r][c] === 3) { ctx.font = "bold " + Math.floor(cell * 0.65) + "px sans-serif"; ctx.fillText("💥", x + cell / 2, y + cell / 2); }
+            else if (playerBoard[r][c] === 3) { ctx.font = "bold " + Math.floor(cell * 0.62) + "px sans-serif"; ctx.fillText("💥", x + cell / 2, y + cell / 2); }
         }
     }
 }

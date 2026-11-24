@@ -9,10 +9,15 @@
 <body>
     <div class="game-shell">
         <div class="top-hud">
-            <div class="status-badge" id="turn-text">GILIRANMU: KUNCI TARGET</div>
+            <div class="status-badge" id="status-text">PILIH LEVEL & SUSUN KAPAL</div>
             <div class="hud-actions">
+                <select id="level-select" class="hud-select" title="Pilih Level">
+                    <option value="easy">🟢 KADET</option>
+                    <option value="medium" selected>🟡 KAPTEN</option>
+                    <option value="hard">🔴 LAKSAMANA</option>
+                </select>
                 <button id="btn-sound" class="hud-btn">🔊</button>
-                <button id="btn-fleet" class="hud-btn">🚢 ACAK KAPAL</button>
+                <button id="btn-auto" class="hud-btn">🎲</button>
             </div>
         </div>
 
@@ -22,51 +27,50 @@
             <div id="end-modal" class="modal hidden">
                 <div class="modal-card">
                     <h2 id="end-title">KEMENANGAN!</h2>
-                    <p id="end-desc">Semua kapal musuh tenggelam.</p>
+                    <p id="end-desc">Semua armada musuh tenggelam.</p>
                     <button id="btn-replay" class="fire-restart-btn">MAIN LAGI</button>
                 </div>
             </div>
         </div>
 
-        <!-- Konsol Metalik Bawah (Persis Gambar 1) -->
         <div class="control-deck">
             <div class="deck-top">
-                <!-- Lampu Indikator SHOTS -->
                 <div class="led-panel">
                     <div class="leds">
                         <span class="led on" id="led-1"></span>
                         <span class="led on" id="led-2"></span>
                         <span class="led on" id="led-3"></span>
                     </div>
-                    <span class="deck-label">SHOTS</span>
+                    <span class="deck-label" id="led-label">SETUP</span>
                 </div>
 
-                <!-- Tombol Merah Besar + Tutup Pengaman -->
                 <div class="big-btn-housing">
                     <div class="glass-hood"></div>
-                    <button id="btn-fire" class="red-fire-btn" title="TEMBAK">💥</button>
+                    <button id="btn-main" class="red-fire-btn" title="EKSEKUSI">⚔️</button>
                 </div>
 
-                <!-- Kunci Pengaman -->
                 <div class="key-panel">
-                    <div class="key-ring">🔑</div>
-                    <span class="deck-label">ARMED</span>
+                    <div class="key-ring" id="fleet-count">5/5</div>
+                    <span class="deck-label">MUSUH</span>
                 </div>
             </div>
 
-            <!-- Bar Senjata Spesial (Mirip Gambar 1) -->
-            <div class="weapon-bar">
+            <!-- Bar Senjata dengan Sistem Isi Ulang Energi -->
+            <div class="weapon-bar locked" id="weapon-bar">
                 <button class="weapon-slot active" id="wp-standard">
                     <span class="wp-icon">🚀</span>
                     <span class="wp-name">STANDARD</span>
+                    <span class="wp-sub">SIAP</span>
                 </button>
                 <button class="weapon-slot" id="wp-sonar">
                     <span class="wp-icon">📡</span>
-                    <span class="wp-name">SONAR (<span id="sonar-ammo">2</span>)</span>
+                    <span class="wp-name">SONAR</span>
+                    <span class="wp-sub" id="sonar-charge">2/2 ⚡</span>
                 </button>
                 <button class="weapon-slot" id="wp-barrage">
                     <span class="wp-icon">💣</span>
-                    <span class="wp-name">BARRAGE (<span id="barrage-ammo">1</span>)</span>
+                    <span class="wp-name">BARRAGE</span>
+                    <span class="wp-sub" id="barrage-charge">4/4 ⚡</span>
                 </button>
             </div>
         </div>
